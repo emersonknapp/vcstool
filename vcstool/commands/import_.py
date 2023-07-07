@@ -24,7 +24,9 @@ class ImportCommand(Command):
     help = 'Import the list of repositories'
 
     def __init__(
-        self, args, url, version=None, recursive=False, shallow=False
+        self, args, url,
+        version=None, recursive=False, shallow=False,
+        remote=None,
     ):
         super(ImportCommand, self).__init__(args)
         self.url = url
@@ -34,6 +36,7 @@ class ImportCommand(Command):
         self.skip_existing = args.skip_existing
         self.recursive = recursive
         self.shallow = shallow
+        self.remote = remote
 
 
 def get_parser():
@@ -107,6 +110,8 @@ def get_repos_in_vcstool_format(repositories):
             repo['url'] = attributes['url']
             if 'version' in attributes:
                 repo['version'] = attributes['version']
+            if 'remote' in attributes:
+                repo['remote'] = attributes['remote']
         except KeyError as e:
             print(
                 ansi('yellowf') + (
@@ -168,10 +173,12 @@ def generate_jobs(repos, args):
             continue
 
         client = clients[0](path)
+        # print(repo)
         command = ImportCommand(
             args, repo['url'],
             str(repo['version']) if 'version' in repo else None,
-            recursive=args.recursive, shallow=args.shallow)
+            recursive=args.recursive, shallow=args.shallow,
+            remote=repo['remote'] if 'remote' in repo else None)
         job = {'client': client, 'command': command}
         jobs.append(job)
     return jobs

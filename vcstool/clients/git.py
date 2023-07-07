@@ -230,6 +230,9 @@ class GitClient(VcsClientBase):
                 'output': "Repository data lacks the 'url' value",
                 'returncode': 1
             }
+        if command.remote is None:
+            command.remote = 'origin'
+        remote_exists = False
 
         self._check_executable()
         if GitClient.is_repository(self.path):
@@ -237,31 +240,43 @@ class GitClient(VcsClientBase):
             result_urls = self._get_remote_urls()
             if result_urls['returncode']:
                 return result_urls
+            # print(f'Command remote {command.remote}: {command.url}')
             for url, remote in result_urls['output']:
-                if url == command.url:
-                    break
-            else:
-                if command.skip_existing:
-                    return {
-                        'cmd': '',
-                        'cwd': self.path,
-                        'output':
-                            'Skipped existing repository with different URL',
-                        'returncode': 0
-                    }
-                if not command.force:
-                    return {
-                        'cmd': '',
-                        'cwd': self.path,
-                        'output':
-                            'Path already exists and contains a different '
-                            'repository',
-                        'returncode': 1
-                    }
-                try:
-                    rmtree(self.path)
-                except OSError:
-                    os.remove(self.path)
+                # print(f'Remote {remote}: {url}')
+                if remote == command.remote:
+                    if url != command.url:
+                        return {
+                            'cmd': '',
+                            'cwd': self.path,
+                            'output':
+                                f'Remote {remote} already exists in path but '
+                                'points to different repository.',
+                            'returncode': 1
+                        }
+                    else:
+                        remote_exists = True
+                        break
+                # if command.skip_existing:
+                #     return {
+                #         'cmd': '',
+                #         'cwd': self.path,
+                #         'output':
+                #             'Skipped existing repository with different URL',
+                #         'returncode': 0
+                #     }
+                # if not command.force:
+                #     return {
+                #         'cmd': '',
+                #         'cwd': self.path,
+                #         'output':
+                #             'Path already exists and contains a different '
+                #             'repository',
+                #         'returncode': 1
+                #     }
+                # try:
+                #     rmtree(self.path)
+                # except OSError:
+                #     os.remove(self.path)
 
         elif command.skip_existing and os.path.exists(self.path):
             return {
@@ -283,13 +298,19 @@ class GitClient(VcsClientBase):
             return not_exist
 
         if GitClient.is_repository(self.path):
-            if command.skip_existing:
-                checkout_version = None
-            elif command.version:
+            if not remote_exists:
+                cmd_remote_add = [GitClient._executable, 'remote', 'add', command.remote, command.url]
+                result_remote_add = self._run_command(cmd_remote_add)
+                if result_remote_add['returncode']:
+                    return result_remote_add
+
+            # if command.skip_existing:
+            #     checkout_version = None
+            if command.version:
                 checkout_version = command.version
             else:
                 # determine remote HEAD branch
-                cmd_remote = [GitClient._executable, 'remote', 'show', remote]
+                cmd_remote = [GitClient._executable, 'remote', 'show', command.remote]
                 # override locale in order to parse output
                 env = os.environ.copy()
                 env['LC_ALL'] = 'C'
@@ -312,7 +333,7 @@ class GitClient(VcsClientBase):
                     return result_remote
 
             # fetch updates for existing repo
-            cmd_fetch = [GitClient._executable, 'fetch', remote]
+            cmd_fetch = [GitClient._executable, 'fetch', command.remote]
             if command.shallow:
                 result_version_type, version_name = self._check_version_type(
                     command.url, checkout_version)
@@ -322,7 +343,7 @@ class GitClient(VcsClientBase):
                 if version_type == 'branch':
                     cmd_fetch.append(
                         'refs/heads/%s:refs/remotes/%s/%s' %
-                        (version_name, remote, version_name))
+                        (version_name, command.remote, version_name))
                 elif version_type == 'hash':
                     cmd_fetch.append(checkout_version)
                 elif version_type == 'tag':
@@ -364,7 +385,7 @@ class GitClient(VcsClientBase):
                     # creating tracking branch
                     cmd_branch = [
                         GitClient._executable, 'branch', version_name,
-                        '%s/%s' % (remote, version_name)]
+                        '%s/%s' % (command.remote, version_name)]
                     result_branch = self._run_command(cmd_branch)
                     if result_branch['returncode']:
                         result_branch['output'] = \
@@ -412,7 +433,7 @@ class GitClient(VcsClientBase):
                 output = result_init['output']
 
                 cmd_remote_add = [
-                    GitClient._executable, 'remote', 'add', 'origin',
+                    GitClient._executable, 'remote', 'add', remote,
                     command.url]
                 result_remote_add = self._run_command(cmd_remote_add)
                 if result_remote_add['returncode']:
@@ -420,7 +441,7 @@ class GitClient(VcsClientBase):
                 cmd += ' && ' + ' '.join(cmd_remote_add)
                 output = '\n'.join([output, result_remote_add['output']])
 
-                cmd_fetch = [GitClient._executable, 'fetch', 'origin']
+                cmd_fetch = [GitClient._executable, 'fetch', remote]
                 if version_type == 'hash':
                     cmd_fetch.append(command.version)
                 elif version_type == 'tag':
